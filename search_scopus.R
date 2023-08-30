@@ -1,16 +1,18 @@
 # Scopus search
-require(data.table)
-require(rscopus)
-require(dplyr)
+library(data.table)
+library(rscopus)
+library(dplyr)
+library(dotenv)
+setwd('~/Desktop/Review-PlateletsRNABPsMotifs/')
+load_dot_env('.env')
 
 ## START UGR VPN CONNECTION
 
 # Add API KEY
 # ===
 
-## ALBA's API KEY b8f77d35cc4eda36098a8b8e2f3be33f
-
-rscopus::set_api_key('b8f77d35cc4eda36098a8b8e2f3be33f')
+APIKEY = Sys.getenv('APIKEY') 
+rscopus::set_api_key(APIKEY)
 queryID = 'plateletsRNAmotifs'
 
 # Build the query
@@ -139,13 +141,13 @@ scopus = rbindlist(queryRes)
 if (any(duplicated(scopus))){
   scopus <- scopus[!duplicated(scopus),]
 }
+nrow(scopus)
 
 # Save it!
 # ===
 saveRDS(scopus, file = paste0('~/Desktop/Review-PlateletsRNABPsMotifs/', queryID, '.rds'))
 View(scopus)
 
-nrow(scopus)
 
 
 library(openxlsx)
