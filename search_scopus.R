@@ -3,6 +3,7 @@ library(data.table)
 library(rscopus)
 library(dplyr)
 library(dotenv)
+library(openxlsx)
 setwd('~/Desktop/Review-PlateletsRNABPsMotifs/')
 load_dot_env('.env')
 
@@ -16,38 +17,50 @@ rscopus::set_api_key(APIKEY)
 queryID = 'plateletsRNAmotifs'
 
 # Build the query
+# SCOPUS API SEARCH TIPS
+# https://nonprod-devportal.elsevier.com/sc_search_tips.html
+
 # keywords 
 ## 1- RNA motif, RBP, platelets, megakaryocytes, RNA localization
 
-# ===
-datatype = c('RNABP','rna binding protein','binding motifs', 
-            'clip-seq','RNA localization','RNA motif')
-celltype = c('platelet','megakaryocyte')
-organism = c('human','homo sapiens')
+### TO DO
+# Keywords to discard: non-coding RNA (ncRNA), animal models, clinic, medicine
+# Only articles from the last 15 years?
+# Only articles in Q1 journals
 
-sourceSample = list(organism = organism,
-                    tissuestate = tissuestate)
+# ===
+# sourceSample = list(organism = organism) # ,tissuestate = tissuestate)
 
 #datatype = c('transcriptome','transcriptomic','proteome','proteomic',
 #             'RNAseq','RNA-Seq', 'RNABP','binding proteins','binding motifs',
 #             'gene expression', 'chip-seq','clip-seq','RNA localization','RNA motif')
 
-queries = list()
-query = list()
-for (d in seq_along(datatype)) {
-  for (i in seq_along(sourceSample)) {
-    y = paste0('TITLE-ABS-KEY(', datatype[d], ') & ', 'TITLE-ABS-KEY(', celltype, ') & ')
-    x = paste0('TITLE-ABS-KEY(', sourceSample[[i]], ')')
-    x = paste(x, collapse = " OR ")
-    queries[[i]] = paste0(y, x)
-  }
-  query[[d]] = unlist(queries, use.names = F)
-}
-query = unlist(query)
+datatype = c('RNABP','"rna binding protein"','"binding motifs"', 
+             'clip-seq','"RNA localization"','"RNA motif"')
+datatypeSTR <- paste(datatype, collapse = ' OR ')
+cat(datatypeSTR)
 
-# Omic queries
-# ===
-# Gene expression
+celltype = c('platelet','megakaryo?')
+celltypeSTR <- paste(celltype, collapse = ' OR ')
+
+organism = c('human','sapiens')
+organismSTR <- paste(organism, collapse = ' OR ')
+
+avoid = c('"non-coding RNA"','ncRNA', '"animal models"', 'clinic', 'medicine')#, 'lncRNA', 'miRNA')
+avoidSTR <- paste(avoid, collapse = ' AND NOT ')
+
+yearsAgoLimit <- 15 
+pubyearSTR <- paste('PUBYEAR >',2023 - yearsAgoLimit)
+
+languageSTR <- 'LANGUAGE(english)'
+
+doctypeSTR <- 'DOCTYPE(le)'
+
+query <- paste0('TITLE-ABS-KEY((',organismSTR,') AND (',celltypeSTR,') 
+                AND (',datatypeSTR, ') AND NOT ',avoidSTR,') AND ', pubyearSTR, 
+                ' AND ',languageSTR,' AND NOT ', doctypeSTR)
+cat(query)
+
 queryRes = list()
 completeArticle = list()
 for (qidx in seq_along(query)) {
@@ -59,8 +72,8 @@ for (qidx in seq_along(query)) {
     count = 25)
   
   # Identify datatypestr from query
-  datatypestr = strsplit(query[qidx], '&')[[1]][1]
-  datatypestr = gsub("[\\(\\)]", "", regmatches(datatypestr, gregexpr("\\(.*?\\)", datatypestr))[[1]])
+  # datatypestr = strsplit(query[qidx], '&')[[1]][1]
+  # datatypestr = gsub("[\\(\\)]", "", regmatches(datatypestr, gregexpr("\\(.*?\\)", datatypestr))[[1]])
   
   # Format results
   res = list()
@@ -86,8 +99,8 @@ for (qidx in seq_along(query)) {
       abstract = NA
     }
     
-    celltype = strsplit(query[qidx], ' & ')[[1]][2]
-    celltype = gsub("[\\(\\)]", "", regmatches(celltype, gregexpr("\\(.*?\\)", celltype))[[1]])
+    # celltype = strsplit(query[qidx], ' & ')[[1]][2]
+    # celltype = gsub("[\\(\\)]", "", regmatches(celltype, gregexpr("\\(.*?\\)", celltype))[[1]])
     
     nAuthors = as.numeric(completeArticle[[qidx]]$entries[[i]]$`author-count`$`@total`)
     if (length(nAuthors) == 0) {
@@ -105,12 +118,18 @@ for (qidx in seq_along(query)) {
       firstAuthor = completeArticle[[qidx]]$entries[[i]]$author[[1]]$authname
     }
     
+    keywords <- completeArticle[[qidx]]$entries[[i]]$authkeywords
+    if (is.null(keywords)){
+      keywords = NA
+    }
+    
     if (completeArticle[[qidx]]$total_results == 0) {
       res[[i]] = NULL
     } else{
       # Create data.frame with paper information
       res[[i]] = data.frame(
-        datatype = datatypestr,
+        # datatype = datatypestr,
+        # celltype = celltype,
         pubmedID = pubmedID,
         URL = completeArticle[[qidx]]$entries[[i]]$`prism:url`,
         title = completeArticle[[qidx]]$entries[[i]]$`dc:title`,
@@ -122,7 +141,7 @@ for (qidx in seq_along(query)) {
         firstAuthor = firstAuthor,
         lastAuthor = lastAuthor,
         abstract = abstract,
-        celltype = celltype,
+        keywords = keywords, 
         citations = completeArticle[[qidx]]$entries[[i]]$`citedby-count`,
         OA = completeArticle[[qidx]]$entries[[i]]$openaccess,
         subtype = ifelse(is.null(completeArticle[[qidx]]$entries[[i]]$subtypeDescription),
@@ -132,11 +151,9 @@ for (qidx in seq_along(query)) {
     }
   }
   result = rbindlist(res)
-  
-  # save query results
   queryRes[[qidx]] = result
-  
 }
+
 scopus = rbindlist(queryRes)
 if (any(duplicated(scopus))){
   scopus <- scopus[!duplicated(scopus),]
@@ -145,10 +162,45 @@ nrow(scopus)
 
 # Save it!
 # ===
-saveRDS(scopus, file = paste0('~/Desktop/Review-PlateletsRNABPsMotifs/', queryID, '.rds'))
+saveRDS(scopus, file = paste0('~/Desktop/Review-PlateletsRNABPsMotifs/', queryID, '3.rds'))
 View(scopus)
 
+withminimun <- (grepl('platelet',scopus$title, ignore.case = T) | grepl('megakaryo',scopus$title, ignore.case = T) | 
+               grepl('platelet',scopus$abstract, ignore.case = T) | grepl('megakaryo',scopus$abstract, ignore.case = T) | 
+               grepl('platelet',scopus$keywords, ignore.case = T) | grepl('megakaryo',scopus$keywords, ignore.case = T) )
+sum(withminimun)
+
+scopusGOOD <- scopus[which(withminimun),] 
+scopusBAD <- scopus[which(!withminimun),]
+
+nrow(scopus)
+nrow(scopusGOOD)
+nrow(scopusBAD)
+
+## 1º SEARCH
+# write.xlsx(scopus,'~/Desktop/Review-PlateletsRNABPsMotifs/firstSearch.xlsx')
+## 2º SEARCH
+# write.xlsx(scopus,'~/Desktop/Review-PlateletsRNABPsMotifs/secondSearch.xlsx')
+## 3º SEARCH
+write.xlsx(scopusGOOD,'~/Desktop/Review-PlateletsRNABPsMotifs/thirdSearch_GOOD.xlsx')
+write.xlsx(scopusBAD,'~/Desktop/Review-PlateletsRNABPsMotifs/thirdSearch_BAD.xlsx')
 
 
-library(openxlsx)
-write.xlsx(scopus,'~/Desktop/Review-PlateletsRNABPsMotifs/firstSearch.xlsx')
+# oldScopus <- read.xlsx('secondSearch.xlsx')
+# withminimun <- (grepl('platelet',oldScopus$title, ignore.case = T) | grepl('megakaryo',oldScopus$title, ignore.case = T) | 
+#                   grepl('platelet',oldScopus$abstract, ignore.case = T) | grepl('megakaryo',oldScopus$abstract, ignore.case = T) | 
+#                   grepl('platelet',oldScopus$keywords, ignore.case = T) | grepl('megakaryo',oldScopus$keywords, ignore.case = T) )
+# oldscopusGOOD <- oldScopus[which(withminimun),] 
+# oldscopusBAD <- oldScopus[which(!withminimun),]
+# 
+
+nrow(scopus)
+
+length(intersect(scopus$pubmedID,oldScopus$pubmedID))
+
+all(na.omit(scopus$pubmedID) %in% na.omit(oldScopus$pubmedID))
+
+all(na.omit(scopusGOOD$pubmedID) %in% na.omit(oldScopus$pubmedID))
+all(na.omit(scopusGOOD$pubmedID) %in% na.omit(oldscopusGOOD$pubmedID))
+
+
